@@ -122,10 +122,13 @@ if [ "$BACKUP_TYPE" -eq 2 ]; then
     echo
     if [[ "$CHOICE" =~ [rR] ]]; then
         step "Rebooting..."
+        sudo rm /caproverrestore.sh
         sleep 2
         sudo reboot
         exit 0
     fi
+else
+    sudo rm /caproverrestore.sh    
 fi
 
 echo -e "\n${GREEN}==> Process complete! CapRover should be running. <==${NC}"
