@@ -38,6 +38,15 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 step "Updating apt cache..."
 sudo apt-get update &>/dev/null & pid=$!; spinner $pid
 
+step "Creating /captain and /captain-volumes directory..."
+sudo mkdir -p /captain /captain-volumes
+
+echo -e "\n${YELLOW}==> WAITING: Please upload the following files:${NC}"
+echo -e "${YELLOW}- 'backup.tar' to          /captain"
+echo -e "- 'volumes-backup.tar.gz' to /captain-volumes${NC}"
+echo -e "${YELLOW}Once the two files are uploaded, PRESS ENTER to continue...${NC}"
+read
+
 step "Installing Docker..."
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &>/dev/null & pid=$!; spinner $pid
 
@@ -49,15 +58,6 @@ else
   read
 fi
 
-step "Creating /captain and /captain-volumes directory..."
-sudo mkdir -p /captain /captain-volumes
-
-echo -e "\n${YELLOW}==> WAITING: Please upload the following files:${NC}"
-echo -e "${YELLOW}- 'backup.tar' to          /captain"
-echo -e "- 'volumes-backup.tar.gz' to /captain-volumes${NC}"
-echo -e "${YELLOW}Once the two files are uploaded, PRESS ENTER to continue...${NC}"
-read
-
 step "Disabling Apache server..."
 sudo systemctl stop apache2 2>/dev/null || true
 sudo systemctl disable apache2 2>/dev/null || true
@@ -68,6 +68,10 @@ sudo docker run -d --name caprover \
     -e ACCEPTED_TERMS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /captain:/captain caprover/caprover
+
+step "Extracting volumes-backup..."
+sudo tar xzvf /captain-volumes/volumes-backup.tar.gz -C /var/lib/docker/volumes
+
 
 echo -e "\n${RED}Do you want to DELETE the /captain-volumes directory and the volume backup file? [y/N]${NC}"
 read -r DELETECAPTAINVOLUMES
