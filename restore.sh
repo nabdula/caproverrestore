@@ -22,10 +22,10 @@ step() {
 }
 
 step "Updating packages..."
-sudo apt-get update &>/dev/null & spinner $!
+sudo apt-get update &>/dev/null & pid=$!; spinner $pid
 
 step "Installing pre-requisites..."
-sudo apt-get install -y ca-certificates curl &>/dev/null & spinner $!
+sudo apt-get install -y ca-certificates curl &>/dev/null & pid=$!; spinner $pid
 
 step "Adding Docker GPG key..."
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -36,10 +36,10 @@ step "Adding Docker repository..."
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 
 step "Updating apt cache..."
-sudo apt-get update &>/dev/null & spinner $!
+sudo apt-get update &>/dev/null & pid=$!; spinner $pid
 
 step "Installing Docker..."
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &>/dev/null & spinner $!
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &>/dev/null & pid=$!; spinner $pid
 
 step "Checking Docker status..."
 sudo systemctl status docker --no-pager
@@ -47,7 +47,10 @@ sudo systemctl status docker --no-pager
 step "Creating /captain and /captain-volumes directory..."
 sudo mkdir -p /captain /captain-volumes
 
-echo -e "\n${YELLOW}==> Please upload 'backup.tar' and 'volumes-backup.tar.gz' to /captain and /captain-volumes now, then press ENTER to continue <==${NC}"
+echo -e "\n${YELLOW}==> WAITING: Please upload the following files:${NC}"
+echo -e "${YELLOW}- 'backup.tar' to          /captain"
+echo -e "- 'volumes-backup.tar.gz' to /captain-volumes${NC}"
+echo -e "${YELLOW}Once the two files are uploaded, PRESS ENTER to continue...${NC}"
 read
 
 step "Disabling Apache server..."
@@ -61,16 +64,13 @@ sudo docker run -d --name caprover \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /captain:/captain caprover/caprover
 
-step "Restoring CapRover volumes backup (volumes-backup.tar.gz)..."
-sudo tar xzvf /captain/volumes-backup.tar.gz -C /var/lib/docker/volumes
-
 echo -e "\n${RED}Do you want to DELETE the /captain-volumes directory and the volume backup file? [y/N]${NC}"
 read -r DELETECAPTAINVOLUMES
 if [[ "$DELETECAPTAINVOLUMES" =~ ^([yY][eE][sS]|[yY])$ ]]; then
     sudo rm -rf /captain-volumes
-    echo -e "${GREEN}/captain volumes directory deleted.${NC}"
+    echo -e "${GREEN}/captain-volumes directory deleted.${NC}"
 else
-    echo -e "${YELLOW}/captain volumes directory NOT deleted. You may delete it later safely.${NC}"
+    echo -e "${YELLOW}/captain-volumes directory NOT deleted. You may delete it later safely.${NC}"
 fi
 
 echo -e "\n${YELLOW}==> Restart required for volumes backup to work"
