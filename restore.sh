@@ -42,7 +42,12 @@ step "Installing Docker..."
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin &>/dev/null & pid=$!; spinner $pid
 
 step "Checking Docker status..."
-sudo systemctl status docker --no-pager
+if systemctl is-active --quiet docker; then
+  echo "Docker is running."
+else
+  echo "Docker is NOT running. Pressing Enter will continue script execution..."
+  read
+fi
 
 step "Creating /captain and /captain-volumes directory..."
 sudo mkdir -p /captain /captain-volumes
