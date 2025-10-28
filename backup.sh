@@ -1,0 +1,1 @@
+sudo tar -czf /volumes-backup.tar.gz -C /var/lib/docker/volumes .

@@ -104,7 +104,7 @@ if [ "$BACKUP_TYPE" -eq 2 ]; then
     done
 
     step "Extracting volumes-backup (this might take a while)..."
-    sudo tar xzvf /captain-volumes/volumes-backup.tar.gz -C /var/lib/docker/volumes &>/dev/null
+    sudo sudo tar -xzf /captain-volumes/volumes-backup.tar.gz -C /var/lib/docker/volumes &>/dev/null
     echo -e "${GREEN}Volumes extraction successful.${NC}"
 
     echo -e "\n${RED}Do you want to DELETE the /captain-volumes directory and the volume backup file? [y/N]${NC}"
