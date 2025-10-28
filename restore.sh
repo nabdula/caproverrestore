@@ -22,6 +22,7 @@ step() {
 }
 
 # Select backup type
+printf '\n%.0s' {1..20}
 echo -e "${YELLOW}Select restore/install mode:${NC}"
 echo -e "1. CapRover backup only (no volumes)"
 echo -e "2. CapRover + volumes backup"
@@ -52,8 +53,8 @@ step "Updating packages in background..."
 sudo apt-get update &>/dev/null &
 UPDATE_PID=$!
 
-echo -ne "${YELLOW}You can upload files now if needed. "
-read -rp "Press ENTER to continue when uploads are finished.${NC}"
+echo -e "${YELLOW}You can upload files now if needed.\nPress ENTER to continue when uploads are finished.${NC}"
+read
 
 # Wait for update to finish if it has not
 wait $UPDATE_PID
@@ -88,12 +89,13 @@ step "Disabling Apache server..."
 sudo systemctl stop apache2 2>/dev/null || true
 sudo systemctl disable apache2 2>/dev/null || true
 
-step "Starting CapRover using Docker..."
+step "Initiating CapRover using Docker..."
 sudo docker run -d --name caprover \
     -p 80:80 -p 443:443 -p 3000:3000 \
     -e ACCEPTED_TERMS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /captain:/captain caprover/caprover
+    -v /captain:/captain caprover/caprover &>/dev/null && \
+echo -e "${GREEN}CapRover initiated successfully.${NC}"
 
 # Only extract volumes if type 2 selected
 if [ "$BACKUP_TYPE" -eq 2 ]; then
@@ -107,7 +109,7 @@ if [ "$BACKUP_TYPE" -eq 2 ]; then
     sudo sudo tar -xzf /captain-volumes/volumes-backup.tar.gz -C /var/lib/docker/volumes &>/dev/null
     echo -e "${GREEN}Volumes extraction successful.${NC}"
 
-    echo -e "\n${RED}Do you want to DELETE the /captain-volumes directory and the volume backup file? [y/N]${NC}"
+    echo -e "\n${YELLOW}Do you want to DELETE the /captain-volumes directory and the volume backup file? [y/N]${NC}"
     read -r DELETECAPTAINVOLUMES
     if [[ "$DELETECAPTAINVOLUMES" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         sudo rm -rf /captain-volumes
