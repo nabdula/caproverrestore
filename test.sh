@@ -6,7 +6,7 @@ echo "You pressed Enter. Script continues."
 
 echo "Do you want to delete test.txt? [y/N]"
 read -r DELETE
-if [[ "$DELETE" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+if [[ "$DELETE" == "y" || "$DELETE" == "Y" ]]; then
     echo "Would delete file here."
 else
     echo "No deletion."
