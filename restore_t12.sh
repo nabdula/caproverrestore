@@ -44,6 +44,7 @@ fi
 
 step "Stopping Docker to free up all ports..."
 sudo systemctl stop docker
+sudo systemctl stop docker.socket
 sudo killall docker-proxy 2>/dev/null || true
 sleep 2
 
