@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# CapRover Restore + VPS Hardening (Final Polish)
+# CapRover Restore + VPS Hardening (Smart V3)
 # ==========================================
 
 set -e
@@ -14,8 +14,15 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 SPIN='|/-\'
 
-# Detect IP for SCP hints
-SERVER_IP=$(curl -s ifconfig.me || echo "YOUR_SERVER_IP")
+# --- 1. Robust IP Detection ---
+# Try external curl first, fallback to internal route, fallback to hostname
+SERVER_IP=$(curl -s --connect-timeout 3 ifconfig.me)
+if [ -z "$SERVER_IP" ]; then
+    SERVER_IP=$(ip route get 1 | awk '{print $7}' 2>/dev/null)
+fi
+if [ -z "$SERVER_IP" ]; then
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+fi
 
 # --- Helper Functions ---
 function spinner() {
@@ -51,11 +58,11 @@ fi
 
 clear
 echo -e "${GREEN}==============================================${NC}"
-echo -e "${GREEN}   CapRover Restore & Hardening (Final)       ${NC}"
+echo -e "${GREEN}   CapRover Restore & Hardening (V3)          ${NC}"
 echo -e "${GREEN}==============================================${NC}"
 
 # ==========================================
-# 1. Setup & Inputs
+# 2. Setup & Inputs
 # ==========================================
 
 header "Configuration Setup"
@@ -85,7 +92,7 @@ if [[ ! "$BACKUP_TYPE" =~ ^[123]$ ]]; then error "Invalid selection."; fi
 USER_HOME="/home/$NEW_USER"
 
 # ==========================================
-# 2. System Prep
+# 3. System Prep
 # ==========================================
 
 step "Updating System..."
@@ -121,7 +128,7 @@ ufw --force enable
 systemctl enable --now fail2ban
 
 # ==========================================
-# 3. Docker Installation
+# 4. Docker Installation
 # ==========================================
 
 step "Preparing Docker..."
@@ -143,7 +150,7 @@ fi
 usermod -aG docker "$NEW_USER"
 
 # ==========================================
-# 4. Upload & Restore Logic
+# 5. Upload & Restore Logic (Smart Check)
 # ==========================================
 
 mkdir -p /captain /captain-volumes
@@ -151,51 +158,76 @@ if [ "$BACKUP_TYPE" -ne 3 ]; then
     rm -rf /captain/data/*
 fi
 
-# --- 4a. Upload Backup.tar ---
+# --- 5a. Upload Backup.tar ---
 if [ "$BACKUP_TYPE" -eq 1 ] || [ "$BACKUP_TYPE" -eq 2 ]; then
     header "ACTION REQUIRED: Upload Backup.tar"
     TARGET="$USER_HOME/backup.tar"
     
     echo -e "Copy this command and run it on your local machine:"
     echo -e "${GREEN}scp backup.tar $NEW_USER@$SERVER_IP:~/backup.tar${NC}"
-    echo -e "\nWaiting for upload to complete..."
-    
+    echo -e "\nMonitor below:"
+
+    prev_size=-1
     while true; do
         if [ -f "$TARGET" ]; then
-            if tar -tf "$TARGET" &>/dev/null; then
-                 echo -e "\n${GREEN}Integrity check passed.${NC}"
-                 mv "$TARGET" /captain/
-                 break
+            curr_size=$(stat -c%s "$TARGET")
+            readable_size=$(du -h "$TARGET" | cut -f1)
+            
+            if [ "$curr_size" -gt "$prev_size" ]; then
+                echo -ne "\r${YELLOW}Uploading... (Size: $readable_size)${NC}      "
+                prev_size=$curr_size
+                sleep 2
             else
-                 echo -ne "\r${YELLOW}File detected (Uploading...)${NC}"
-                 sleep 3
+                echo -ne "\r${BLUE}Verifying Integrity... ($readable_size)${NC}      "
+                if tar -tf "$TARGET" &>/dev/null; then
+                     echo -e "\n${GREEN}Integrity Check: PASSED${NC}"
+                     mv "$TARGET" /captain/
+                     break
+                else
+                     echo -ne "\r${RED}Integrity Failed. File corrupted? Waiting for re-upload...${NC} "
+                     sleep 3
+                fi
             fi
         else
+            echo -ne "\r${YELLOW}Waiting for file...${NC}      "
             sleep 2
         fi
     done
 fi
 
-# --- 4b. Upload & EXTRACT Volumes ---
+# --- 5b. Upload & EXTRACT Volumes ---
 if [ "$BACKUP_TYPE" -eq 2 ]; then
     header "ACTION REQUIRED: Upload Volumes Backup"
     TARGET="$USER_HOME/volumes-backup.tar.gz"
 
     echo -e "Copy this command and run it on your local machine:"
     echo -e "${GREEN}scp volumes-backup.tar.gz $NEW_USER@$SERVER_IP:~/volumes-backup.tar.gz${NC}"
-    echo -e "\nWaiting for upload to complete..."
+    echo -e "\nMonitor below:"
 
+    prev_size=-1
     while true; do
         if [ -f "$TARGET" ]; then
-            if tar -tzf "$TARGET" &>/dev/null; then
-                 echo -e "\n${GREEN}Integrity check passed.${NC}"
-                 mv "$TARGET" /captain-volumes/
-                 break
+            curr_size=$(stat -c%s "$TARGET")
+            readable_size=$(du -h "$TARGET" | cut -f1)
+            
+            if [ "$curr_size" -gt "$prev_size" ]; then
+                echo -ne "\r${YELLOW}Uploading... (Size: $readable_size)${NC}      "
+                prev_size=$curr_size
+                sleep 2
             else
-                 echo -ne "\r${YELLOW}File detected (Uploading...)${NC}"
-                 sleep 3
+                echo -ne "\r${BLUE}Verifying Integrity... ($readable_size)${NC}      "
+                # -tzf is stricter for .tar.gz
+                if tar -tzf "$TARGET" &>/dev/null; then
+                     echo -e "\n${GREEN}Integrity Check: PASSED${NC}"
+                     mv "$TARGET" /captain-volumes/
+                     break
+                else
+                     echo -ne "\r${RED}Integrity Failed. File corrupted? Waiting for re-upload...${NC} "
+                     sleep 3
+                fi
             fi
         else
+            echo -ne "\r${YELLOW}Waiting for file...${NC}      "
             sleep 2
         fi
     done
@@ -206,7 +238,7 @@ if [ "$BACKUP_TYPE" -eq 2 ]; then
 fi
 
 # ==========================================
-# 5. Start CapRover
+# 6. Start CapRover
 # ==========================================
 
 step "Installing CapRover CLI & Starting Server..."
@@ -234,7 +266,7 @@ else
 fi
 
 # ==========================================
-# 6. Finish
+# 7. Finish
 # ==========================================
 
 chown -R "$NEW_USER":"$NEW_USER" "$USER_HOME"
