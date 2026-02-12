@@ -60,6 +60,8 @@ NEW_USER=${NEW_USER:-myuser}
 # SSH Key
 echo -e "\n${YELLOW}--- SSH Setup ---${NC}"
 echo -e "Paste your SSH PUBLIC KEY (starts with ssh-rsa / ssh-ed25519) and press ENTER:"
+echo -e "To create a new key on local machine: ssh-keygen -t ed25519"
+echo -e "To copy public key from local machine: cat ~/.ssh/id_rsa.pub | pbcopy"
 read -r SSH_KEY
 if [[ -z "$SSH_KEY" ]]; then error "No SSH Key provided."; fi
 
