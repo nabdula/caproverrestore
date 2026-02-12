@@ -77,7 +77,7 @@ header "SSH Setup"
 echo -e "We need your Public Key to secure the server."
 echo -e "${BLUE}Run these on your LOCAL machine if needed:${NC}"
 echo -e "  1. Generate Key:  ${GREEN}ssh-keygen -t ed25519${NC}"
-echo -e "  2. Copy Key:      ${GREEN}cat ~/.ssh/id_ed25519.pub | pbcopy${NC} or ${GREEN}(cat ~/.ssh/id_rsa.pub | pbcopy)${NC}"
+echo -e "  2. Copy Key:      ${GREEN}cat ~/.ssh/id_ed25519.pub | pbcopy${NC} or (${GREEN}cat ~/.ssh/id_rsa.pub | pbcopy${NC})"
 echo -e "\n${YELLOW}Paste your Public Key below and press ENTER:${NC}"
 read -r SSH_KEY
 if [[ -z "$SSH_KEY" ]]; then error "No SSH Key provided."; fi
