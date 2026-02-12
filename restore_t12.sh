@@ -43,8 +43,8 @@ if [[ ! "$BACKUP_TYPE" =~ ^[123]$ ]]; then
 fi
 
 step "Stopping Docker to free up all ports..."
-sudo systemctl stop docker
-sudo systemctl stop docker.socket
+sudo systemctl stop docker 2>/dev/null || true
+sudo systemctl stop docker.socket 2>/dev/null || true
 sudo killall docker-proxy 2>/dev/null || true
 sleep 2
 
