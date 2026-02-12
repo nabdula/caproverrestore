@@ -16,7 +16,7 @@ SPIN='|/-\'
 
 # --- 1. IP Detection (Fixed) ---
 # We prioritize internal IP detection to avoid "upstream connect errors"
-SERVER_IP=$(hostname -I | awk '{print $1}')
+SERVER_IP=$(hostname -I | awk '{print $2}')
 if [ -z "$SERVER_IP" ]; then
     SERVER_IP=$(ip route get 1 | awk '{print $7}' 2>/dev/null)
 fi
@@ -77,7 +77,7 @@ header "SSH Setup"
 echo -e "We need your Public Key to secure the server."
 echo -e "${BLUE}Run these on your LOCAL machine if needed:${NC}"
 echo -e "  1. Generate Key:  ${GREEN}ssh-keygen -t ed25519${NC}"
-echo -e "  2. Copy Key:      ${GREEN}cat ~/.ssh/id_ed25519.pub | pbcopy${NC} (or id_rsa.pub)"
+echo -e "  2. Copy Key:      ${GREEN}cat ~/.ssh/id_ed25519.pub | pbcopy${NC} or ${GREEN}(cat ~/.ssh/id_rsa.pub | pbcopy)${NC}"
 echo -e "\n${YELLOW}Paste your Public Key below and press ENTER:${NC}"
 read -r SSH_KEY
 if [[ -z "$SSH_KEY" ]]; then error "No SSH Key provided."; fi
@@ -245,7 +245,7 @@ fi
 step "Installing CapRover CLI..."
 npm install -g caprover &>/dev/null
 
-step "Ensuring Port 80/443 are FREE..."
+step "Ensuring Ports 80/443 are free..."
 # 1. Stop web servers
 systemctl stop apache2 nginx 2>/dev/null || true
 systemctl disable apache2 nginx 2>/dev/null || true
@@ -283,7 +283,7 @@ chown -R "$NEW_USER":"$NEW_USER" "$USER_HOME"
 header "RESTORE COMPLETE"
 echo -e "1. CapRover IP: http://$SERVER_IP:3000"
 echo -e "2. SSH User:    ${YELLOW}$NEW_USER${NC}"
-echo -e "3. Root Login:  ${RED}DISABLED${NC}"
+echo -e "3. Root Login:  ${YELLOW}DISABLED${NC}"
 
 if [ "$BACKUP_TYPE" -eq 2 ]; then
     echo -e "\n${GREEN}Volumes restored. Reboot recommended.${NC}"
