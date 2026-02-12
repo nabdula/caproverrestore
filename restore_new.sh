@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# CapRover Restore + VPS Hardening (Final)
+# CapRover Restore + VPS Hardening (Final Polish)
 # ==========================================
 
 set -e
@@ -13,6 +13,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 SPIN='|/-\'
+
+# Detect IP for SCP hints
+SERVER_IP=$(curl -s ifconfig.me || echo "YOUR_SERVER_IP")
 
 # --- Helper Functions ---
 function spinner() {
@@ -30,8 +33,10 @@ step() {
     echo -e "\n${BLUE}==>${NC} ${GREEN}$1${NC}"
 }
 
-warn() {
-    echo -e "${YELLOW}$1${NC}"
+header() {
+    echo -e "\n${YELLOW}--------------------------------------------------${NC}"
+    echo -e "${YELLOW}   $1${NC}"
+    echo -e "${YELLOW}--------------------------------------------------${NC}"
 }
 
 error() {
@@ -46,27 +51,31 @@ fi
 
 clear
 echo -e "${GREEN}==============================================${NC}"
-echo -e "${GREEN}   CapRover Restore & Hardening (Safe Mode)   ${NC}"
+echo -e "${GREEN}   CapRover Restore & Hardening (Final)       ${NC}"
 echo -e "${GREEN}==============================================${NC}"
 
 # ==========================================
 # 1. Setup & Inputs
 # ==========================================
 
+header "Configuration Setup"
+
 # User Setup
 read -rp "Enter name for new sudo user (default: myuser): " NEW_USER
 NEW_USER=${NEW_USER:-myuser}
 
 # SSH Key
-echo -e "\n${YELLOW}--- SSH Setup ---${NC}"
-echo -e "Paste your SSH PUBLIC KEY (starts with ssh-rsa / ssh-ed25519) and press ENTER:"
-echo -e "To create a new key on local machine: ssh-keygen -t ed25519"
-echo -e "To copy public key from local machine: cat ~/.ssh/id_rsa.pub | pbcopy"
+header "SSH Setup"
+echo -e "We need your Public Key to secure the server."
+echo -e "${BLUE}Run these on your LOCAL machine if needed:${NC}"
+echo -e "  1. Generate Key:  ${GREEN}ssh-keygen -t ed25519${NC}"
+echo -e "  2. Copy Key:      ${GREEN}cat ~/.ssh/id_ed25519.pub | pbcopy${NC} (or id_rsa.pub)"
+echo -e "\n${YELLOW}Paste your Public Key below and press ENTER:${NC}"
 read -r SSH_KEY
 if [[ -z "$SSH_KEY" ]]; then error "No SSH Key provided."; fi
 
 # Restore Type
-echo -e "\n${YELLOW}--- Restore Selection ---${NC}"
+header "Restore Selection"
 echo "1. CapRover backup only (no volumes)"
 echo "2. CapRover + volumes backup"
 echo "3. Fresh install (no backup)"
@@ -76,7 +85,7 @@ if [[ ! "$BACKUP_TYPE" =~ ^[123]$ ]]; then error "Invalid selection."; fi
 USER_HOME="/home/$NEW_USER"
 
 # ==========================================
-# 2. System Prep (Update, User, SSH, FW)
+# 2. System Prep
 # ==========================================
 
 step "Updating System..."
@@ -138,57 +147,60 @@ usermod -aG docker "$NEW_USER"
 # ==========================================
 
 mkdir -p /captain /captain-volumes
-
-# Clean /captain/data to ensure backup.tar is detected cleanly
 if [ "$BACKUP_TYPE" -ne 3 ]; then
     rm -rf /captain/data/*
 fi
 
 # --- 4a. Upload Backup.tar ---
 if [ "$BACKUP_TYPE" -eq 1 ] || [ "$BACKUP_TYPE" -eq 2 ]; then
-    step "Upload 'backup.tar'..."
+    header "ACTION REQUIRED: Upload Backup.tar"
     TARGET="$USER_HOME/backup.tar"
-    echo -e "Use SCP to upload to: ${GREEN}$TARGET${NC}"
+    
+    echo -e "Copy this command and run it on your local machine:"
+    echo -e "${GREEN}scp backup.tar $NEW_USER@$SERVER_IP:~/backup.tar${NC}"
+    echo -e "\nWaiting for upload to complete..."
     
     while true; do
         if [ -f "$TARGET" ]; then
-            echo -e "${BLUE}Verifying file...${NC}"
             if tar -tf "$TARGET" &>/dev/null; then
+                 echo -e "\n${GREEN}Integrity check passed.${NC}"
                  mv "$TARGET" /captain/
-                 echo -e "${GREEN}backup.tar accepted.${NC}"
                  break
             else
-                 echo -e "${RED}File incomplete. Re-upload.${NC}"
-                 rm "$TARGET" 2>/dev/null
+                 echo -ne "\r${YELLOW}File detected (Uploading...)${NC}"
+                 sleep 3
             fi
+        else
+            sleep 2
         fi
-        sleep 2
     done
 fi
 
-# --- 4b. Upload & EXTRACT Volumes (BEFORE CapRover Starts) ---
+# --- 4b. Upload & EXTRACT Volumes ---
 if [ "$BACKUP_TYPE" -eq 2 ]; then
-    step "Upload 'volumes-backup.tar.gz'..."
+    header "ACTION REQUIRED: Upload Volumes Backup"
     TARGET="$USER_HOME/volumes-backup.tar.gz"
-    echo -e "Use SCP to upload to: ${GREEN}$TARGET${NC}"
-    
+
+    echo -e "Copy this command and run it on your local machine:"
+    echo -e "${GREEN}scp volumes-backup.tar.gz $NEW_USER@$SERVER_IP:~/volumes-backup.tar.gz${NC}"
+    echo -e "\nWaiting for upload to complete..."
+
     while true; do
         if [ -f "$TARGET" ]; then
-            echo -e "${BLUE}Verifying archive...${NC}"
             if tar -tzf "$TARGET" &>/dev/null; then
+                 echo -e "\n${GREEN}Integrity check passed.${NC}"
                  mv "$TARGET" /captain-volumes/
-                 echo -e "${GREEN}Archive verified.${NC}"
                  break
             else
-                 echo -e "${RED}File incomplete. Re-upload.${NC}"
-                 rm "$TARGET" 2>/dev/null
+                 echo -ne "\r${YELLOW}File detected (Uploading...)${NC}"
+                 sleep 3
             fi
+        else
+            sleep 2
         fi
-        sleep 2
     done
 
-    step "Restoring Volumes to /var/lib/docker/volumes..."
-    # We extract NOW so data is ready when apps start
+    step "Restoring Volumes..."
     tar -xzf /captain-volumes/volumes-backup.tar.gz -C /var/lib/docker/volumes
     echo -e "${GREEN}Volumes restored successfully!${NC}"
 fi
@@ -205,7 +217,6 @@ docker rm -f $(docker ps -aq --filter "ancestor=caprover/caprover") 2>/dev/null 
 docker rm -f caprover 2>/dev/null || true
 
 # Start CapRover
-# It will see /captain/backup.tar and auto-initiate restore
 docker run -d --name caprover \
   -p 80:80 -p 443:443 -p 3000:3000 \
   -e ACCEPTED_TERMS=true \
@@ -228,17 +239,13 @@ fi
 
 chown -R "$NEW_USER":"$NEW_USER" "$USER_HOME"
 
-echo -e "\n${GREEN}==============================================${NC}"
-echo -e "${GREEN}   RESTORE COMPLETE   ${NC}"
-echo -e "${GREEN}==============================================${NC}"
-echo -e "1. CapRover IP: http://$(curl -s ifconfig.me):3000"
-echo -e "2. SSH User: ${YELLOW}$NEW_USER${NC}"
-echo -e "3. Root Login: DISABLED"
+header "RESTORE COMPLETE"
+echo -e "1. CapRover IP: http://$SERVER_IP:3000"
+echo -e "2. SSH User:    ${YELLOW}$NEW_USER${NC}"
+echo -e "3. Root Login:  ${RED}DISABLED${NC}"
 
 if [ "$BACKUP_TYPE" -eq 2 ]; then
-    echo -e "\n${GREEN}Volumes were restored BEFORE apps started.${NC}"
-    echo -e "Your apps should pick up the data immediately."
-    echo -e "${YELLOW}A reboot is recommended to ensure all network bridges reset clean.${NC}"
+    echo -e "\n${GREEN}Volumes restored. Reboot recommended.${NC}"
     read -r -p "Reboot now? [y/N] " CHOICE
     if [[ "$CHOICE" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         reboot
