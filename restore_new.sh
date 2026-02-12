@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# CapRover Restore + VPS Hardening Script
+# CapRover Restore + VPS Hardening Script (Fixed)
 # ==========================================
 
 set -e
@@ -40,11 +40,6 @@ error() {
     exit 1
 }
 
-wait_for_enter() {
-    echo -e "${YELLOW}Press ENTER to continue...${NC}"
-    read -r
-}
-
 # --- Root Check ---
 if [[ $EUID -ne 0 ]]; then
    error "This script must be run as root. Please switch to root (sudo -i) and try again."
@@ -65,15 +60,14 @@ step "Configuration Setup"
 read -rp "Enter name for new sudo user (default: myuser): " NEW_USER
 NEW_USER=${NEW_USER:-myuser}
 
-# Get SSH Key (Crucial for automated hardening)
+# Get SSH Key
 echo -e "\n${YELLOW}--- SSH Setup ---${NC}"
 echo "To secure the server, we need your SSH Public Key (e.g., from id_rsa.pub)."
-echo "If you don't have one, generate it locally with 'ssh-keygen' and copy the content."
 echo -e "${YELLOW}Paste your SSH PUBLIC KEY below and press ENTER:${NC}"
 read -r SSH_KEY
 
 if [[ -z "$SSH_KEY" ]]; then
-    error "No SSH Key provided. Aborting to prevent locking you out."
+    error "No SSH Key provided. Aborting."
 fi
 
 # Get Backup Type
@@ -119,33 +113,21 @@ chmod 600 "$USER_HOME/.ssh/authorized_keys"
 chown -R "$NEW_USER":"$NEW_USER" "$USER_HOME/.ssh"
 
 step "Hardening SSH (Disabling Root Login & Password Auth)..."
-# Backup config
 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-
-# Update configurations using sed
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-
-# Restart SSH
 systemctl restart sshd
-echo -e "${GREEN}SSH Hardened. Root login disabled.${NC}"
+echo -e "${GREEN}SSH Hardened.${NC}"
 
 step "Configuring Firewall (UFW)..."
-# Reset UFW to be safe
 ufw --force reset >/dev/null
-
-# Allow SSH first!
 ufw allow OpenSSH
 ufw allow 22/tcp
-
-# CapRover Ports
 ufw allow 80,443,3000,996,7946,4789,2377/tcp
 ufw allow 7946,4789,2377/udp
-
-# Enable
 ufw --force enable
-echo -e "${GREEN}Firewall enabled and ports locked down.${NC}"
+echo -e "${GREEN}Firewall enabled.${NC}"
 
 step "Enabling Fail2Ban..."
 systemctl enable --now fail2ban
@@ -154,25 +136,18 @@ systemctl enable --now fail2ban
 # 4. Docker Installation / Prep
 # ==========================================
 
-# Fix: Check if Docker is running before trying to stop it
 step "Checking Docker status..."
 if command -v docker &> /dev/null; then
     echo "Docker found. Preparing for CapRover..."
     systemctl stop docker 2>/dev/null || true
     systemctl stop docker.socket 2>/dev/null || true
-    # Remove old locks
     rm -f /var/lib/docker/network/files/local-kv.db
-    
-    step "Starting Docker..."
     systemctl start docker
     sleep 2
-    
-    step "Pruning Docker resources..."
     docker system prune -a -f
     docker network prune -f
 else
-    echo "Docker not found. Installing..."
-    # Install Docker Official
+    echo "Installing Docker..."
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
@@ -180,60 +155,73 @@ else
       "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
       $(lsb_release -cs) stable" | \
       tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
     apt-get update &>/dev/null
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 
-# Add new user to docker group
 usermod -aG docker "$NEW_USER"
 
-# Check for port conflicts
 step "Ensuring ports 80/443 are free..."
 systemctl stop apache2 nginx 2>/dev/null || true
 systemctl disable apache2 nginx 2>/dev/null || true
 
-for port in 80 443; do
-    if lsof -i :$port | grep LISTEN; then
-        error "Port $port is still in use! Please check manually (sudo lsof -i :$port)."
-    fi
-done
-
 # ==========================================
-# 5. Restore Logic
+# 5. Restore Logic (Verified)
 # ==========================================
 
-# Prepare CapRover directories
 mkdir -p /captain /captain-volumes
 
+# --- Backup.tar Logic ---
 if [ "$BACKUP_TYPE" -eq 1 ] || [ "$BACKUP_TYPE" -eq 2 ]; then
-    step "Waiting for Backup File..."
-    echo -e "${YELLOW}IMPORTANT:${NC} Upload 'backup.tar' to: ${GREEN}$USER_HOME/backup.tar${NC}"
-    echo -e "You must use SCP/SFTP with user '${GREEN}$NEW_USER${NC}' and your SSH Key."
-    echo -e "Example local command: ${BLUE}scp backup.tar $NEW_USER@<YOUR-IP>:~/backup.tar${NC}"
+    step "Waiting for 'backup.tar'..."
+    TARGET="$USER_HOME/backup.tar"
+    echo -e "Upload to: ${GREEN}$TARGET${NC}"
     
-    while [ ! -f "$USER_HOME/backup.tar" ]; do
-         wait_for_enter
-         if [ -f "$USER_HOME/backup.tar" ]; then break; fi
-         echo -e "${RED}File not found yet.${NC}"
+    while true; do
+        if [ ! -f "$TARGET" ]; then
+            echo -e "${YELLOW}File not found. Please upload it via SCP.${NC}"
+            read -rp "Press ENTER once upload is finished..."
+        else
+            echo -e "${BLUE}Verifying file integrity...${NC}"
+            # Check tar integrity (-tf reads file to check for errors)
+            if tar -tf "$TARGET" &>/dev/null; then
+                 echo -e "${GREEN}Valid backup.tar found.${NC}"
+                 mv "$TARGET" /captain/
+                 break
+            else
+                 echo -e "${RED}File is corrupted or incomplete.${NC}"
+                 echo -e "${YELLOW}Please re-upload and try again.${NC}"
+                 read -rp "Press ENTER to retry..."
+            fi
+        fi
     done
-    
-    mv "$USER_HOME/backup.tar" /captain/
-    echo -e "${GREEN}backup.tar found and moved.${NC}"
 fi
 
+# --- Volumes Backup Logic ---
 if [ "$BACKUP_TYPE" -eq 2 ]; then
-    step "Waiting for Volumes Backup..."
-    echo -e "${YELLOW}IMPORTANT:${NC} Upload 'volumes-backup.tar.gz' to: ${GREEN}$USER_HOME/volumes-backup.tar.gz${NC}"
+    step "Waiting for 'volumes-backup.tar.gz'..."
+    TARGET="$USER_HOME/volumes-backup.tar.gz"
+    echo -e "Upload to: ${GREEN}$TARGET${NC}"
     
-    while [ ! -f "$USER_HOME/volumes-backup.tar.gz" ]; do
-         wait_for_enter
-         if [ -f "$USER_HOME/volumes-backup.tar.gz" ]; then break; fi
-         echo -e "${RED}File not found yet.${NC}"
+    while true; do
+        if [ ! -f "$TARGET" ]; then
+            echo -e "${YELLOW}File not found. Please upload it via SCP.${NC}"
+            read -rp "Press ENTER once upload is finished..."
+        else
+            echo -e "${BLUE}Verifying archive integrity (this may take a moment)...${NC}"
+            # Check gzip tar integrity (-tzf)
+            if tar -tzf "$TARGET" &>/dev/null; then
+                 echo -e "${GREEN}Valid volumes-backup.tar.gz found.${NC}"
+                 mv "$TARGET" /captain-volumes/
+                 break
+            else
+                 echo -e "${RED}File is corrupted or incomplete (Unexpected EOF).${NC}"
+                 echo -e "${YELLOW}Please re-upload and try again.${NC}"
+                 # Optional: rm "$TARGET" to force clean upload
+                 read -rp "Press ENTER to retry..."
+            fi
+        fi
     done
-    
-    mv "$USER_HOME/volumes-backup.tar.gz" /captain-volumes/
-    echo -e "${GREEN}volumes-backup.tar.gz found and moved.${NC}"
 fi
 
 # ==========================================
@@ -244,7 +232,6 @@ step "Installing CapRover CLI..."
 npm install -g caprover &>/dev/null
 
 step "Starting CapRover Server..."
-# Remove old if exists
 docker rm -f $(docker ps -aq --filter "ancestor=caprover/caprover") 2>/dev/null || true
 docker rm -f caprover 2>/dev/null || true
 
@@ -264,7 +251,6 @@ if [ "$CAPROVER_STARTED" != "yes" ]; then
     error "Failed to start CapRover server. Check 'docker logs caprover'."
 fi
 
-# Wait for container startup
 step "Waiting for CapRover to initialize (15s)..."
 sleep 15
 
@@ -277,8 +263,14 @@ echo -e "${GREEN}CapRover is running!${NC}"
 # Restore Volumes if needed
 if [ "$BACKUP_TYPE" -eq 2 ] && [ -f /captain-volumes/volumes-backup.tar.gz ]; then
     step "Restoring Volumes..."
-    tar -xzf /captain-volumes/volumes-backup.tar.gz -C /var/lib/docker/volumes
-    echo -e "${GREEN}Volumes extracted.${NC}"
+    # Verify one last time before extract
+    if tar -tzf /captain-volumes/volumes-backup.tar.gz &>/dev/null; then
+        tar -xzf /captain-volumes/volumes-backup.tar.gz -C /var/lib/docker/volumes
+        echo -e "${GREEN}Volumes extracted successfully.${NC}"
+    else
+        echo -e "${RED}Error: Archive corrupted during move. Cannot restore volumes.${NC}"
+        exit 1
+    fi
 fi
 
 # ==========================================
@@ -286,16 +278,13 @@ fi
 # ==========================================
 
 step "Final Cleanup..."
-# Fix permissions on home dir just in case
 chown -R "$NEW_USER":"$NEW_USER" "$USER_HOME"
 
 echo -e "\n${GREEN}==============================================${NC}"
 echo -e "${GREEN}   Setup Complete!   ${NC}"
 echo -e "${GREEN}==============================================${NC}"
 echo -e "1. Access CapRover: http://$(curl -s ifconfig.me):3000"
-echo -e "2. Your new SSH User: ${YELLOW}$NEW_USER${NC}"
-echo -e "3. Root login is now ${RED}DISABLED${NC}."
-echo -e "4. Use: ${BLUE}ssh $NEW_USER@$(curl -s ifconfig.me)${NC}"
+echo -e "2. Log in via SSH: ${BLUE}ssh $NEW_USER@$(curl -s ifconfig.me)${NC}"
 
 if [ "$BACKUP_TYPE" -eq 2 ]; then
     echo -e "\n${YELLOW}Since volumes were restored, a reboot is highly recommended.${NC}"
