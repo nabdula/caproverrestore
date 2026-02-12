@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# CapRover Restore + VPS Hardening (Smart V3)
+# CapRover Restore + VPS Hardening (V4 - Robust)
 # ==========================================
 
 set -e
@@ -14,14 +14,15 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 SPIN='|/-\'
 
-# --- 1. Robust IP Detection ---
-# Try external curl first, fallback to internal route, fallback to hostname
-SERVER_IP=$(curl -s --connect-timeout 3 ifconfig.me)
+# --- 1. IP Detection (Fixed) ---
+# We prioritize internal IP detection to avoid "upstream connect errors"
+SERVER_IP=$(hostname -I | awk '{print $1}')
 if [ -z "$SERVER_IP" ]; then
     SERVER_IP=$(ip route get 1 | awk '{print $7}' 2>/dev/null)
 fi
+# Final fallback
 if [ -z "$SERVER_IP" ]; then
-    SERVER_IP=$(hostname -I | awk '{print $1}')
+    SERVER_IP="YOUR_VPS_IP"
 fi
 
 # --- Helper Functions ---
@@ -58,7 +59,7 @@ fi
 
 clear
 echo -e "${GREEN}==============================================${NC}"
-echo -e "${GREEN}   CapRover Restore & Hardening (V3)          ${NC}"
+echo -e "${GREEN}   CapRover Restore & Hardening (V4)          ${NC}"
 echo -e "${GREEN}==============================================${NC}"
 
 # ==========================================
@@ -76,7 +77,7 @@ header "SSH Setup"
 echo -e "We need your Public Key to secure the server."
 echo -e "${BLUE}Run these on your LOCAL machine if needed:${NC}"
 echo -e "  1. Generate Key:  ${GREEN}ssh-keygen -t ed25519${NC}"
-echo -e "  2. Copy Key:      ${GREEN}cat ~/.ssh/id_ed25519.pub | pbcopy${NC} (cat ~/.ssh/id_rsa.pub | pbcopy)"
+echo -e "  2. Copy Key:      ${GREEN}cat ~/.ssh/id_ed25519.pub | pbcopy${NC} (or id_rsa.pub)"
 echo -e "\n${YELLOW}Paste your Public Key below and press ENTER:${NC}"
 read -r SSH_KEY
 if [[ -z "$SSH_KEY" ]]; then error "No SSH Key provided."; fi
@@ -95,9 +96,10 @@ USER_HOME="/home/$NEW_USER"
 # 3. System Prep
 # ==========================================
 
-step "Updating System..."
+step "Updating System & Installing Tools..."
+# Added 'psmisc' to get the 'fuser' command for killing ports later
 apt-get update &>/dev/null & spinner $!
-apt-get install -y ca-certificates curl nano htop npm ufw fail2ban sudo gnupg lsb-release &>/dev/null & spinner $!
+apt-get install -y ca-certificates curl nano htop npm ufw fail2ban sudo gnupg lsb-release psmisc &>/dev/null & spinner $!
 
 step "Creating User & Hardening SSH..."
 if ! id "$NEW_USER" &>/dev/null; then
@@ -150,7 +152,7 @@ fi
 usermod -aG docker "$NEW_USER"
 
 # ==========================================
-# 5. Upload & Restore Logic (Smart Check)
+# 5. Upload & Restore Logic
 # ==========================================
 
 mkdir -p /captain /captain-volumes
@@ -216,7 +218,6 @@ if [ "$BACKUP_TYPE" -eq 2 ]; then
                 sleep 2
             else
                 echo -ne "\r${BLUE}Verifying Integrity... ($readable_size)${NC}      "
-                # -tzf is stricter for .tar.gz
                 if tar -tzf "$TARGET" &>/dev/null; then
                      echo -e "\n${GREEN}Integrity Check: PASSED${NC}"
                      mv "$TARGET" /captain-volumes/
@@ -241,14 +242,22 @@ fi
 # 6. Start CapRover
 # ==========================================
 
-step "Installing CapRover CLI & Starting Server..."
+step "Installing CapRover CLI..."
 npm install -g caprover &>/dev/null
 
-# Clean old containers
+step "Ensuring Port 80/443 are FREE..."
+# 1. Stop web servers
+systemctl stop apache2 nginx 2>/dev/null || true
+systemctl disable apache2 nginx 2>/dev/null || true
+# 2. Kill old CapRover containers
 docker rm -f $(docker ps -aq --filter "ancestor=caprover/caprover") 2>/dev/null || true
 docker rm -f caprover 2>/dev/null || true
+# 3. NUCLEAR OPTION: Kill anything else holding the ports
+fuser -k 80/tcp 2>/dev/null || true
+fuser -k 443/tcp 2>/dev/null || true
+sleep 2
 
-# Start CapRover
+step "Starting CapRover Server..."
 docker run -d --name caprover \
   -p 80:80 -p 443:443 -p 3000:3000 \
   -e ACCEPTED_TERMS=true \
